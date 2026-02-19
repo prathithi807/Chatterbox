@@ -1,0 +1,218 @@
+REAL-TIME WEBSOCKET CHAT APPLICATION
+
+Project Overview
+
+This project is a Real-Time Chat Application developed using FastAPI for backend services, WebSocket for bidirectional real-time communication, and SQLite for persistent data storage. The frontend is built using HTML, CSS, and JavaScript.
+
+The system enables secure user authentication, real-time messaging, chat history persistence, and administrative monitoring. It combines REST API endpoints for authentication and WebSocket connections for live message broadcasting.
+
+System Architecture
+
+The application follows a client-server architecture. The frontend communicates with the backend through HTTP endpoints for registration and login, and establishes a WebSocket connection for real-time chat functionality.
+
+Application Entry Point (main.py)
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from user_routes import router as user_router
+from websocket_routes import router as websocket_router
+
+app = FastAPI()
+app.include_router(user_router)
+app.include_router(websocket_router)
+app.mount("/ui", StaticFiles(directory="frontend", html=True), name="frontend")
+
+This initializes the FastAPI application, registers route modules, and serves frontend files.
+
+Database Design
+
+The system uses two tables: users and messages.
+
+Database Initialization (init_db.py)
+
+import sqlite3
+
+conn = sqlite3.connect("chat.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+username TEXT UNIQUE NOT NULL,
+email TEXT UNIQUE NOT NULL,
+password_hash TEXT NOT NULL)""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS messages (
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+username TEXT NOT NULL,
+message TEXT NOT NULL,
+timestamp TEXT NOT NULL,
+seen INTEGER DEFAULT 0)""")
+
+conn.commit()
+conn.close()
+
+The users table stores authentication details, while the messages table stores chat history along with timestamps.
+
+Authentication and User Management
+
+User authentication is implemented using password hashing and session-based token validation.
+
+Password Hashing
+
+import hashlib
+
+def hash_password(password: str):
+return hashlib.sha256(password.encode()).hexdigest()
+
+Passwords are never stored in plain text, ensuring data security.
+
+Register Endpoint
+
+@router.post("/register")
+def register(user: UserRegister):
+hashed = hash_password(user.password)
+
+
+cursor.execute(  
+    "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",  
+    (user.username, user.email, hashed)  
+)  
+conn.commit()  
+
+return {"message": "User registered successfully"}  
+This endpoint hashes the password and stores user details in the database.
+
+Login Endpoint
+
+import uuid
+
+sessions = {}
+
+@router.post("/login")
+def login(user: UserLogin):
+hashed = hash_password(user.password)
+
+```
+cursor.execute(  
+    "SELECT username FROM users WHERE username=? AND password_hash=?",  
+    (user.username, hashed)  
+)  
+result = cursor.fetchone()  
+
+if result:  
+    token = str(uuid.uuid4())  
+    sessions[token] = user.username  
+    return {"token": token, "username": user.username}  
+
+return {"error": "Invalid credentials"}  
+```
+
+A unique session token is generated and later used for WebSocket authentication.
+
+Real-Time Chat Service
+
+The WebSocket endpoint manages real-time communication between clients.
+
+Token Validation and Connection
+
+@router.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+token = ws.query_params.get("token")
+
+```
+if token not in sessions:  
+    await ws.close()  
+    return  
+
+username = sessions[token]  
+await ws.accept()  
+```
+
+This ensures only authenticated users can connect.
+
+Connection Manager
+
+class Manager:
+def **init**(self):
+self.connections = []
+
+```
+async def connect(self, ws: WebSocket):  
+    self.connections.append(ws)  
+
+async def broadcast(self, data: dict):  
+    for connection in self.connections:  
+        await connection.send_json(data)  
+```
+
+manager = Manager()
+
+The manager maintains active connections and broadcasts events.
+
+Message Handling
+
+if data["type"] == "send":
+cursor.execute(
+"INSERT INTO messages (username, message, timestamp) VALUES (?, ?, ?)",
+(username, data["text"], data["time"])
+)
+conn.commit()
+await manager.broadcast({"type": "message", "user": username, "text": data["text"]})
+
+elif data["type"] == "edit":
+cursor.execute(
+"UPDATE messages SET message=? WHERE id=?",
+(data["text"], data["id"])
+)
+conn.commit()
+await manager.broadcast({"type": "edit", "id": data["id"], "text": data["text"]})
+
+elif data["type"] == "delete":
+cursor.execute("DELETE FROM messages WHERE id=?", (data["id"],))
+conn.commit()
+await manager.broadcast({"type": "delete", "id": data["id"]})
+
+The system supports sending, editing, and deleting messages, with updates stored in the database and broadcast to all connected clients.
+
+Frontend Implementation
+
+Login Request (login.html)
+
+const res = await fetch("[http://127.0.0.1:8000/login](http://127.0.0.1:8000/login)", {
+method: "POST",
+headers: {"Content-Type": "application/json"},
+body: JSON.stringify({username, password})
+});
+
+const data = await res.json();
+localStorage.setItem("token", data.token);
+window.location.href = "/ui/chat.html";
+
+WebSocket Connection (chat.html)
+
+const token = localStorage.getItem("token");
+const ws = new WebSocket("ws://127.0.0.1:8000/ws?token=" + token);
+
+ws.onmessage = function(event) {
+const data = JSON.parse(event.data);
+
+```
+if (data.type === "message") {  
+    renderMessage(data);  
+
+The frontend dynamically updates the interface when new messages are received.
+
+Advantages of the System
+
+The application enables seamless real-time communication through persistent WebSocket connections, ensuring instant message delivery without page reloads. Message persistence through SQLite ensures that users can reconnect and access previous chat history. The modular backend architecture improves maintainability by separating authentication, database management, and WebSocket logic. Security is reinforced through password hashing and token-based session validation, preventing unauthorized access. Additionally, online user tracking and administrative monitoring enhance system transparency and control.
+
+Future Enhancements
+
+The system can be further improved by implementing JWT-based authentication for better scalability and distributed deployment. Features such as private messaging, file sharing support, and interactive message reactions can enhance user experience. Deploying the application on a cloud platform with a responsive and modern UI design would increase accessibility and production readiness.
+
+Conclusion
+
+This Real-Time Chat Application successfully integrates REST APIs and WebSocket communication to provide secure authentication, persistent storage, and real-time message broadcasting. The project demonstrates strong understanding of backend development, database design, real-time protocols, and frontend-backend integration. With further enhancements and deployment, the system can evolve into a scalable and production-ready communication platform.
+
